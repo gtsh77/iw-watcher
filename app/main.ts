@@ -18,9 +18,29 @@ class Main {
 		this.dgram.on('listening',() => console.log(`Listening to ${this.dgram.address().address} on ${this.dgram.address().port}`));
 		this.dgram.on('message', msg => this.msgHandler(msg));
 	}
+	public attackHandler(msg: any): void {
+		let arMsg: string[] = msg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(connected|entered|disconnected|switched|triggered|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")(\w+)(?:".+damage ")(\w+)(?:".+health ")(\w+)"/),
+			d = arMsg[1],
+			m = arMsg[2],
+			y = arMsg[3],
+			h = arMsg[4],
+			mi = arMsg[5],
+			se = arMsg[6],
+			nick = arMsg[7],
+			playerSteam = arMsg[8],
+			playerAction = arMsg[9],
+			victimNick = arMsg[10],
+			victimSteam = arMsg[11],
+			weapon = arMsg[12],
+			damage = arMsg[13],
+			rHp = arMsg[14];
+
+			console.log(`## ${nick} - ${playerSteam} ${playerAction} ${victimNick} - ${victimSteam} w ${weapon} w ${damage} rHp ${rHp}`);		
+	}
 	public msgHandler(msg: any): void {
 		try {
-			let arMsg: string[] = msg.toString('utf8').match(/L (\d{2})\/(\d{2})\/(\d{4}) - (\d{2}):(\d{2}):(\d{2}): (.[^<\d]+).+(STEAM_[\d|:]+|BOT).+(connected|entered|disconnected|switched|triggered|attacked|killed)/),
+			let utMsg = msg.toString('utf8'),
+				arMsg: string[] = utMsg.match(/L (\d{2})\/(\d{2})\/(\d{4}) - (\d{2}):(\d{2}):(\d{2}): (.[^<\d]+).+(STEAM_[\d|:]+|BOT).+(connected|entered|disconnected|switched|triggered|attacked|killed)/),
 				d = arMsg[1],
 				m = arMsg[2],
 				y = arMsg[3],
@@ -31,10 +51,11 @@ class Main {
 				playerSteam = arMsg[8],
 				playerAction = arMsg[9];
 
-			console.log(`## ${nick} - ${playerSteam} ${playerAction}`);			
+			if(playerAction === 'attacked') this.attackHandler(utMsg);
+			else console.log(`## ${nick} - ${playerSteam} ${playerAction}`);				
 		}
 		catch(e){
-			console.log(msg.toString('utf8'));
+			console.log(`not_parsed: ${msg.toString('utf8')}`);
 		}
 
 
