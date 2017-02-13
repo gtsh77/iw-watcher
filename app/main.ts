@@ -59,14 +59,14 @@ class Main {
 			damage = arMsg[13],
 			rHp = arMsg[14];
 
-			console.log(`## ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp}`);		
+			console.log(`## ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp}`);
 	}
 	public authHandler(steamId: string, playerNickName: string): void {
 		if(steamId === 'BOT') steamId = `BOT_${playerNickName}`;
 		//обновим запись в базе или создадим новую
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
-			connection.query(`INSERT INTO players (steamId,hash) VALUES('${steamId}','${this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6)}') ON DUPLICATE KEY UPDATE steamId = steamId`,(err, rows, fields) => {
+			connection.query(`INSERT INTO players (steamId,hash) SELECT '${steamId}','${this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1`,(err, rows, fields) => {
 				if(err) console.log(err);
 			});
 			connection.release();
