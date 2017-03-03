@@ -53,7 +53,7 @@ class Main {
 	public msgHandler(msg: any): void {
 		try {
 			let utMsg = msg.toString('utf8'),
-				arMsg: string[] = utMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(connected|entered|disconnected|switched|triggered|attacked|killed)/),
+				arMsg: string[] = utMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
 				m = arMsg[1],
 				d = arMsg[2],
 				y = arMsg[3],
@@ -66,17 +66,21 @@ class Main {
 				date = new Date(+y,+m-1,+d,+h,+mi,+se),
 				dateLocal = new Date();
 
+			//эмуляция id для ботов
+			if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
+			//определим суть сообщения
 			if(playerAction === 'attacked') this.attackHandler(utMsg);
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
-			else console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
+			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
+			else console.log(`!!! not_specified ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
-			console.log(`not_parsed: ${msg.toString('utf8')}`);
+			console.log(`!!! not_parsed: ${msg.toString('utf8')}`);
 		}
 		//let stMsg: string = msg.toString('utf8').slice(5,-1);
 	}
 	public attackHandler(stMsg: string): void {
-		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(connected|entered|disconnected|switched|triggered|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")(\w+)(?:".+damage ")(\w+)(?:".+health ")(\w+)"/),
+		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")(\w+)(?:".+damage ")(\w+)(?:".+health ")(\w+)"/),
 			m = arMsg[1],
 			d = arMsg[2],
 			y = arMsg[3],
@@ -96,14 +100,15 @@ class Main {
 			console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp}`);
 	}
 	public authHandler(steamId: string, playerNickName: string, date: Date): void {
-		if(steamId === 'BOT') steamId = `BOT_${playerNickName}`;
-
 		//проверим есть ли игрок в базе
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
 			connection.query(`SELECT hash from players where steamId = '${steamId}'`,(err, res, fields) => {
 				if(err) console.log(err);
 				else if(res.length){
+					//создадим сессию
+					this.createSession(steamId, date);
+					//какие-то ответы
 					console.log(`## ${date.toLocaleTimeString()} player auth: ${res[0].hash} ${playerNickName}`);
 					this.cmd(`say [${res[0].hash}] ${playerNickName} auth`);
 				}
@@ -140,10 +145,35 @@ class Main {
 					this.cmd(`say [${res[2][0].hash}] ${playerNickName} new player`);
 					connection.release();							
 			});
+			//создадим сессию
+			this.createSession(steamId, date);
 		});
 	}
-	public createSession(steamId: string): void {
-
+	public createSession(steamId: string, date: Date): void {
+		this.pool.getConnection((err, connection) => {
+			if(err) console.log(err);
+			connection.query(`
+				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8)}' from players WHERE steamId = '${steamId}';
+			`,
+			(err, res, fields) => {
+				if(err) console.log(err);
+				console.log(`## session created ${steamId}`);
+				connection.release();
+			});			
+		});		
+	}
+	public endSession(steamId: string, date: Date): void {
+		this.pool.getConnection((err, connection) => {
+			if(err) console.log(err);
+			connection.query(`
+				UPDATE sessions SET endedAt = '${this.buildISO(date)}' where playerId IN (SELECT id from players where steamId = '${steamId}') ORDER BY id DESC LIMIT 1;
+			`,
+			(err, res, fields) => {
+				if(err) console.log(err);
+				console.log(`## session ended ${steamId}`);
+				connection.release();
+			});			
+		});		
 	}
 
 	static msgList(): void{
