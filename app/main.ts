@@ -42,6 +42,7 @@ class Main {
 		str += ((date.getHours() < 10)?'0'+date.getHours():date.getHours()) + ':';
 		str += ((date.getMinutes() < 10)?'0'+date.getMinutes():date.getMinutes()) + ':';
 		str += ((date.getSeconds() < 10)?'0'+date.getSeconds():date.getSeconds());
+		str += '.'+((date.getMilliseconds() < 100)?((date.getMilliseconds() < 10)?'00'+date.getMilliseconds():'0'+date.getMilliseconds()):date.getMilliseconds());
 		return str;
 	}
 	public init(): void {
@@ -62,10 +63,11 @@ class Main {
 				playerNickName = arMsg[7],
 				playerSteamId = arMsg[8],
 				playerAction = arMsg[9],
-				date = new Date(+y,+m-1,+d,+h,+mi,+se);
+				date = new Date(+y,+m-1,+d,+h,+mi,+se),
+				dateLocal = new Date();
 
 			if(playerAction === 'attacked') this.attackHandler(utMsg);
-			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName,date);
+			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
@@ -92,25 +94,6 @@ class Main {
 			date = new Date(+y,+m-1,+d,+h,+mi,+se);
 
 			console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp}`);
-	}
-	public registerNewPlayer(steamId: string, playerNickName: string, date: Date): void {
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
-			connection.query(`
-
-				INSERT INTO players (steamId,hash, createdAt) SELECT '${steamId}','${this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6)}', '${this.buildISO(date)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1;
-
-				INSERT INTO profiles (nickName, playerId) SELECT '${playerNickName}',id FROM players WHERE steamId = '${steamId}';
-
-				SELECT hash from players where steamId = '${steamId}'
-				`,
-				(err, res, fields) => {
-					if(err) console.log(err);
-					console.log(`## ${date.toLocaleTimeString()} new player registered: ${res[2][0].hash} ${playerNickName}`);
-					this.cmd(`say [${res[2][0].hash}] ${playerNickName} new player`);
-					connection.release();							
-			});
-		});
 	}
 	public authHandler(steamId: string, playerNickName: string, date: Date): void {
 		if(steamId === 'BOT') steamId = `BOT_${playerNickName}`;
@@ -139,6 +122,28 @@ class Main {
 		//обновим историю никнеймов
 		//...
 		//...
+	}
+	public registerNewPlayer(steamId: string, playerNickName: string, date: Date): void {
+		this.pool.getConnection((err, connection) => {
+			if(err) console.log(err);
+			connection.query(`
+
+				INSERT INTO players (steamId,hash, createdAt) SELECT '${steamId}','${this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6)}', '${this.buildISO(date)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1;
+
+				INSERT INTO profiles (nickName, playerId) SELECT '${playerNickName}',id FROM players WHERE steamId = '${steamId}';
+
+				SELECT hash from players where steamId = '${steamId}'
+				`,
+				(err, res, fields) => {
+					if(err) console.log(err);
+					console.log(`## ${date.toLocaleTimeString()} new player registered: ${res[2][0].hash} ${playerNickName}`);
+					this.cmd(`say [${res[2][0].hash}] ${playerNickName} new player`);
+					connection.release();							
+			});
+		});
+	}
+	public createSession(steamId: string): void {
+
 	}
 
 	static msgList(): void{
