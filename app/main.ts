@@ -149,14 +149,16 @@ class Main {
 		});
 	}
 	public createSession(steamId: string, date: Date): void {
+		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8);
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
 			connection.query(`
-				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8)}' from players WHERE steamId = '${steamId}';
+				-- создание сессии
+				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${newHash}' from players WHERE steamId = '${steamId}';
 			`,
 			(err, res, fields) => {
 				if(err) console.log(err);
-				console.log(`## session created ${steamId}`);
+				console.log(`## session created - ${newHash} for ${steamId}`);
 				connection.release();
 			});			
 		});		
@@ -165,6 +167,7 @@ class Main {
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
 			connection.query(`
+				-- простановка endedAt последней сессии
 				UPDATE sessions SET endedAt = '${this.buildISO(date)}' where playerId IN (SELECT id from players where steamId = '${steamId}') ORDER BY id DESC LIMIT 1;
 			`,
 			(err, res, fields) => {
