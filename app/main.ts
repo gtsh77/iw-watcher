@@ -129,20 +129,19 @@ class Main {
 		//...
 	}
 	public registerNewPlayer(steamId: string, playerNickName: string, date: Date): void {
+		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6);
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
 			connection.query(`
-
-				INSERT INTO players (steamId,hash, createdAt) SELECT '${steamId}','${this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6)}', '${this.buildISO(date)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1;
-
+				-- создание учетки
+				INSERT INTO players (steamId,hash, createdAt) SELECT '${steamId}','${newHash}', '${this.buildISO(date)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1;
+				-- создание профиля
 				INSERT INTO profiles (nickName, playerId) SELECT '${playerNickName}',id FROM players WHERE steamId = '${steamId}';
-
-				SELECT hash from players where steamId = '${steamId}'
 				`,
 				(err, res, fields) => {
 					if(err) console.log(err);
-					console.log(`## ${date.toLocaleTimeString()} new player registered: ${res[2][0].hash} ${playerNickName}`);
-					this.cmd(`say [${res[2][0].hash}] ${playerNickName} new player`);
+					console.log(`## ${date.toLocaleTimeString()} new player registered: ${newHash} ${playerNickName}`);
+					this.cmd(`say ## NEW PLAYER: ${newHash} - ${playerNickName}`);
 					connection.release();							
 			});
 			//создадим сессию
