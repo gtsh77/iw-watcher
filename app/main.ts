@@ -6,6 +6,7 @@ console.log('*** WELCOME ***');
 class Main {
 	protected dgram = require('dgram').createSocket('udp4');
 	protected sourcecon = require('sourcecon');
+	protected monitor = require('game-server-query');
 	protected pool = require('mysql').createPool({
 		connectionLimit : 10,
 		multipleStatements: true,
@@ -15,6 +16,8 @@ class Main {
 		database		: 'iwstats'		
 	});
 	protected crypto = require('crypto');
+	protected map: string = null;
+	protected playersNum: number = null;
 	public cmd(cmd: string, callback?: (res: string) => void){
 		var that = this;
 		let sourceconIn = new this.sourcecon("192.168.0.19", 27015); 
@@ -49,6 +52,21 @@ class Main {
 		this.dgram.bind(77,'192.168.0.19');
 		this.dgram.on('listening',() => console.log(`Listening to ${this.dgram.address().address} on ${this.dgram.address().port}`));
 		this.dgram.on('message', msg => this.msgHandler(msg));
+		this.scanServer();
+	}
+	public scanServer(callback?:(string, number) => void): void {
+		this.monitor({
+	        type: 'csgo',
+	        host: '192.168.0.19:27015'
+	    },
+	    state => {
+	        if(state.error){}
+	        else {
+	        	this.map = state.map;
+	        	this.playersNum = state.raw.numplayers;
+	        	if(typeof callback === 'function') callback(state.map,state.raw.numplayers);
+	        }
+	    });
 	}
 	public msgHandler(msg: any): void {
 		try {
@@ -72,6 +90,7 @@ class Main {
 			if(playerAction === 'attacked') this.attackHandler(utMsg);
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
+			else if(playerAction === 'changed') this.setNickName(utMsg, dateLocal);
 			else console.log(`!!! not_specified ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
@@ -177,6 +196,15 @@ class Main {
 			});			
 		});		
 	}
+	public setNickName(stMsg: string, date: Date): void {
+		//определим стим и новый ник
+		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?:.+ ")(.+)(?:")/),
+		playerSteamId = arMsg[8],
+		newNickName = arMsg[10];
+		//добавить в таблицу
+
+		//обновить профайл
+	}
 
 	static msgList(): void{
 		//*** сказать
@@ -209,7 +237,33 @@ class Main {
 
 		// msg L 02/12/2017 - 19:22:58: "Shaman<25><STEAM_1:0:9977876><TERRORIST>" triggered "Dropped_The_Bomb"
 
-		// msg L 02/12/2017 - 19:22:58: "Shaman<25><STEAM_1:0:9977876>" switched from team <TERRORIST> to <Unassigned>		
+		// msg L 02/12/2017 - 19:22:58: "Shaman<25><STEAM_1:0:9977876>" switched from team <TERRORIST> to <Unassigned>	
+
+		//*** change name
+		//L 03/05/2017 - 01:16:08: "Shaman<5><170><STEAM_1:0:9977876><TERRORIST>" changed name to "Shaman"		
+
+
+	}
+
+	static sql(): void {
+		//inner join, group by
+		//SELECT sessions.id,sessions.hash,players.steamId, count(*) AS HIT from sessions inner join players on sessions.playerId = players.id GROUP BY players.steamId ORDER BY HIT DESC LIMIT 5;
+
+		//join таблицы со связью 1к1 
+		//select * from players inner join profiles limit 1
+		//select * from players cross join profiles limit 1
+
+		//last session
+		//SELECT players.steamId,sessions.hash,MAX(sessions.createdAt) from sessions INNER JOIN players ON players.id = sessions.playerId GROUP BY playerId;
+
+		//last session date + total sessions
+		//SELECT players.steamId,sessions.hash,MAX(sessions.createdAt),COUNT(sessions.playerId) as Total from sessions INNER JOIN players ON players.id = sessions.playerId GROUP BY playerId;		
+		//last session date + total sessions + second-after-group-filter (having) + order + limit
+		//SELECT players.steamId,sessions.hash,MAX(sessions.createdAt),COUNT(sessions.playerId) as Total from sessions INNER JOIN players ON players.id = sessions.playerId GROUP BY sessions.playerId HAVING Total > 0 ORDER BY Total DESC LIMIT 5;	
+
+		//last 5 sessions + steamIds
+		//SELECT players.steamId,sessions.hash,MAX(sessions.createdAt),COUNT(sessions.playerId) as Total from sessions INNER JOIN players ON players.id = sessions.playerId GROUP BY sessions.playerId ORDER BY MAX(sessions.createdAt) DESC LIMIT 5;
+
 	}
 
 }
