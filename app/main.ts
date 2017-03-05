@@ -4,6 +4,8 @@
 console.log('*** WELCOME ***');
 
 class Main {
+	protected fs = require('fs');
+	protected StringDecoder = require('string_decoder').StringDecoder;
 	protected dgram = require('dgram').createSocket('udp4');
 	protected sourcecon = require('sourcecon');
 	protected monitor = require('game-server-query');
@@ -32,6 +34,9 @@ class Main {
 		    });
 		});		
 	}
+	public storeError(e: string, fileName: string): void {
+		this.fs.appendFile(fileName, e, 'utf8', err => null);
+	}	
 	public readISO(ISOLocal): Date {
 		return new Date(ISOLocal+'+03:00');
 	}
@@ -53,6 +58,7 @@ class Main {
 		this.dgram.on('listening',() => console.log(`Listening to ${this.dgram.address().address} on ${this.dgram.address().port}`));
 		this.dgram.on('message', msg => this.msgHandler(msg));
 		this.scanServer();
+		//this.cmd('status', res => console.log(res.toString()));
 	}
 	public scanServer(callback?:(string, number) => void): void {
 		this.monitor({
@@ -60,18 +66,14 @@ class Main {
 	        host: '192.168.0.19:27015'
 	    },
 	    state => {
-	        if(state.error){}
-	        else {
-	        	this.map = state.map;
-	        	this.playersNum = state.raw.numplayers;
-	        	if(typeof callback === 'function') callback(state.map,state.raw.numplayers);
-	        }
+	        if(state.error) this.storeError(state.error,'scan.error.log');
+	        else if(typeof callback === 'function') callback(state.map,state.raw.numplayers);
 	    });
 	}
 	public msgHandler(msg: any): void {
 		try {
 			//объявим ключевые переменные
-			let utMsg = msg.toString('utf8'),
+			let utMsg = msg.toString(),
 				newRoundRe: RegExp = new RegExp(/World triggered "Round_Start"/),
 				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
 				dateLocal = new Date(),
@@ -103,9 +105,10 @@ class Main {
 			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
-			console.log(`!!! not_parsed: ${msg.toString('utf8')}`);
+			let utMsg: string = msg.toString();
+			console.log(`!!! not_parsed: ${utMsg}`);
 		}
-		//let stMsg: string = msg.toString('utf8').slice(5,-1);
+		//let stMsg: string = msg.toString().slice(5,-1);
 	}
 	public attackHandler(stMsg: string): void {
 		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")(\w+)(?:".+damage ")(\w+)(?:".+health ")(\w+)"/),
@@ -129,10 +132,10 @@ class Main {
 	}
 	public authHandler(steamId: string, playerNickName: string, date: Date): void {
 		//проверим есть ли игрок в базе
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
 			connection.query(`SELECT hash from players where steamId = '${steamId}'`,(err, res, fields) => {
-				if(err) console.log(err);
+				if(e) this.storeError(e,'error.log');
 				else if(res.length){
 					//создадим сессию
 					this.createSession(steamId, date, playerNickName);
@@ -158,16 +161,16 @@ class Main {
 	}
 	public registerNewPlayer(steamId: string, playerNickName: string, date: Date): void {
 		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6);
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
 			connection.query(`
 				-- создание учетки
 				INSERT INTO players (steamId,hash, createdAt) SELECT '${steamId}','${newHash}', '${this.buildISO(date)}' from DUAL where (SELECT COUNT(*) from players where steamId = '${steamId}') < 1;
 				-- создание профиля
 				INSERT INTO profiles (nickName, playerId) SELECT '${playerNickName}',id FROM players WHERE steamId = '${steamId}';
 				`,
-				(err, res, fields) => {
-					if(err) console.log(err);
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
 					console.log(`## ${date.toLocaleTimeString()} new player registered: ${newHash} ${playerNickName}`);
 					this.cmd(`say ## NEW PLAYER: ${newHash} - ${playerNickName}`);
 					connection.release();							
@@ -178,8 +181,8 @@ class Main {
 	}
 	public createSession(steamId: string, date: Date, nickname: string): void {
 		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8);
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
 			connection.query(`
 				-- создание сессии
 				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${newHash}' from players WHERE steamId = '${steamId}';
@@ -193,22 +196,22 @@ class Main {
 				-- обновить профайл
 				UPDATE profiles SET nickName = '${nickname}' where playerId IN (SELECT id from players where steamId = '${steamId}');
 			`,
-			(err, res, fields) => {
-				if(err) console.log(err);
+			(e, res, fields) => {
+				if(e) this.storeError(e,'error.log');
 				console.log(`## session created - ${newHash} for ${steamId}`);
 				connection.release();
 			});			
 		});		
 	}
 	public endSession(steamId: string, date: Date): void {
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
 			connection.query(`
 				-- простановка endedAt последней сессии
 				UPDATE sessions SET endedAt = '${this.buildISO(date)}' where playerId IN (SELECT id from players where steamId = '${steamId}') ORDER BY id DESC LIMIT 1;
 			`,
-			(err, res, fields) => {
-				if(err) console.log(err);
+			(e, res, fields) => {
+				if(e) this.storeError(e,'error.log');
 				console.log(`## session ended ${steamId}`);
 				connection.release();
 			});			
@@ -226,8 +229,8 @@ class Main {
 			newNickName = arMsg[10];
 		}
 		//запросы
-		this.pool.getConnection((err, connection) => {
-			if(err) console.log(err);
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
 			connection.query(`
 				-- добавить в таблицу никнейм
 				INSERT INTO nicknames (value,roundId,playerId,sessionId) 
@@ -238,8 +241,8 @@ class Main {
 				-- обновить профайл
 				UPDATE profiles SET nickName = '${newNickName}' where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
 			`,
-			(err, res, fields) => {
-				if(err) console.log(err);
+			(e, res, fields) => {
+				if(e) this.storeError(e,'error.log');
 				console.log(`## nickname stored: ${newNickName}`);
 				connection.release();
 			});			
@@ -250,16 +253,16 @@ class Main {
 	public createRound(date: Date): void {
 		let newHash: string = this.crypto.createHash('DSA').update('iwstats_new_round_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,6);
 		this.scanServer((map,pCnt) => {
-			this.pool.getConnection((err, connection) => {
-				if(err) console.log(err);
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
 				connection.query(`
 					-- завершим ласт
 					UPDATE rounds set endedAt = '${this.buildISO(date)}' ORDER BY id DESC LIMIT 1;
 					-- добавим раунд
 					INSERT INTO rounds (hash,createdAt,serverId,mapId) SELECT '${newHash}','${this.buildISO(date)}',1,id from maps where name = '${map}';
 				`,
-				(err, res, fields) => {
-					if(err) console.log(err);
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
 					console.log(`## round created ${newHash}`);
 					connection.release();
 				});
