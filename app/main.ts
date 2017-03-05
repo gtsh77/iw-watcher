@@ -70,28 +70,37 @@ class Main {
 	}
 	public msgHandler(msg: any): void {
 		try {
+			//объявим ключевые переменные
 			let utMsg = msg.toString('utf8'),
-				arMsg: string[] = utMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
-				m = arMsg[1],
-				d = arMsg[2],
-				y = arMsg[3],
-				h = arMsg[4],
-				mi = arMsg[5],
-				se = arMsg[6],
-				playerNickName = arMsg[7],
-				playerSteamId = arMsg[8],
-				playerAction = arMsg[9],
-				date = new Date(+y,+m-1,+d,+h,+mi,+se),
-				dateLocal = new Date();
+				newRoundRe: RegExp = new RegExp(/World triggered "Round_Start"/),
+				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
+				dateLocal = new Date(),
+				arMsg: string[] = null,
+				playerNickName = null,
+				playerSteamId = null,
+				playerAction = null;
+
+			//проверим тип сообщение - раунд
+			if(newRoundRe.test(utMsg)){
+				this.createRound(dateLocal);
+				return;
+			}
+			//проверим тип сообщение - стандарт
+			else {
+				arMsg = utMsg.match(commonRe);
+				playerNickName = arMsg[7];
+				playerSteamId = arMsg[8];
+				playerAction = arMsg[9];
+			}
 
 			//эмуляция id для ботов
 			if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
 			//определим суть сообщения
-			if(playerAction === 'attacked') this.attackHandler(utMsg);
+			if(playerAction === 'attacked') return; //this.attackHandler(utMsg);
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
 			else if(playerAction === 'changed') this.setNickName(utMsg, dateLocal);
-			else console.log(`!!! not_specified ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
+			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
 			console.log(`!!! not_parsed: ${msg.toString('utf8')}`);
@@ -205,8 +214,27 @@ class Main {
 
 		//обновить профайл
 	}
+	public createRound(date: Date): void {
+		let newHash: string = this.crypto.createHash('DSA').update('iwstats_new_round_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,6);
+		this.scanServer((map,pCnt) => {
+			this.pool.getConnection((err, connection) => {
+				if(err) console.log(err);
+				connection.query(`
+					-- завершим ласт
+					UPDATE rounds set endedAt = '${this.buildISO(date)}' ORDER BY id DESC LIMIT 1;
+					-- добавим раунд
+					INSERT INTO rounds (hash,createdAt,serverId,mapId) SELECT '${newHash}','${this.buildISO(date)}',1,id from maps where name = '${map}';
+				`,
+				(err, res, fields) => {
+					if(err) console.log(err);
+					console.log(`## round created ${newHash}`);
+					connection.release();
+				});
+			});
+		});		
+	}
 
-	static msgList(): void{
+	static msgList(): void {
 		//*** сказать
 		//L 02/12/2017 - 19:15:30: "Shaman<2><STEAM_1:0:9977876><TERRORIST>" say "rank"
 
