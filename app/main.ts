@@ -73,7 +73,7 @@ class Main {
 			//объявим ключевые переменные
 			let utMsg = msg.toString('utf8'),
 				newRoundRe: RegExp = new RegExp(/World triggered "Round_Start"/),
-				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
+				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
 				dateLocal = new Date(),
 				arMsg: string[] = null,
 				playerNickName = null,
@@ -99,7 +99,7 @@ class Main {
 			if(playerAction === 'attacked') return; //this.attackHandler(utMsg);
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
-			else if(playerAction === 'changed') this.setNickName(utMsg, dateLocal);
+			else if(playerAction === 'changed') this.setNickName(dateLocal, utMsg);
 			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
@@ -135,7 +135,7 @@ class Main {
 				if(err) console.log(err);
 				else if(res.length){
 					//создадим сессию
-					this.createSession(steamId, date);
+					this.createSession(steamId, date, playerNickName);
 					//какие-то ответы
 					console.log(`## ${date.toLocaleTimeString()} player auth: ${res[0].hash} ${playerNickName}`);
 					this.cmd(`say [${res[0].hash}] ${playerNickName} auth`);
@@ -173,16 +173,25 @@ class Main {
 					connection.release();							
 			});
 			//создадим сессию
-			this.createSession(steamId, date);
+			this.createSession(steamId, date, playerNickName);
 		});
 	}
-	public createSession(steamId: string, date: Date): void {
+	public createSession(steamId: string, date: Date, nickname: string): void {
 		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8);
 		this.pool.getConnection((err, connection) => {
 			if(err) console.log(err);
 			connection.query(`
 				-- создание сессии
 				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${newHash}' from players WHERE steamId = '${steamId}';
+
+				-- добавить в таблицу никнейм
+				INSERT INTO nicknames (value,roundId,playerId,sessionId) 
+				SELECT '${nickname}',rounds.id,players.id,sessions.id from rounds 
+					INNER JOIN players ON players.steamId = '${steamId}' 
+					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
+				ORDER BY rounds.id DESC LIMIT 1;
+				-- обновить профайл				
+				--
 			`,
 			(err, res, fields) => {
 				if(err) console.log(err);
@@ -205,12 +214,35 @@ class Main {
 			});			
 		});		
 	}
-	public setNickName(stMsg: string, date: Date): void {
+	//отдельный метод если change во время игры
+	public setNickName(date: Date, stMsg?: string): void {
 		//определим стим и новый ник
-		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?:.+ ")(.+)(?:")/),
-		playerSteamId = arMsg[8],
-		newNickName = arMsg[10];
-		//добавить в таблицу
+		let arMsg: string[] = null,
+			playerSteamId: string = null,
+			newNickName: string = null;
+		if(stMsg){
+			arMsg = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?:.+ ")(.+)(?:")/);
+			playerSteamId = arMsg[8];
+			newNickName = arMsg[10];
+		}
+		//запросы
+		this.pool.getConnection((err, connection) => {
+			if(err) console.log(err);
+			connection.query(`
+				-- добавить в таблицу никнейм
+				INSERT INTO nicknames (value,roundId,playerId,sessionId) 
+				SELECT '${newNickName}',rounds.id,players.id,sessions.id from rounds 
+					INNER JOIN players ON players.steamId = '${playerSteamId}' 
+					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
+				ORDER BY rounds.id DESC LIMIT 1;
+				-- обновить профайл
+			`,
+			(err, res, fields) => {
+				if(err) console.log(err);
+				console.log(`## nickname stored: ${newNickName}`);
+				connection.release();
+			});			
+		});		
 
 		//обновить профайл
 	}
