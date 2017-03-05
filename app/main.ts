@@ -190,8 +190,8 @@ class Main {
 					INNER JOIN players ON players.steamId = '${steamId}' 
 					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
 				ORDER BY rounds.id DESC LIMIT 1;
-				-- обновить профайл				
-				--
+				-- обновить профайл
+				UPDATE profiles SET nickName = '${nickname}' where playerId IN (SELECT id from players where steamId = '${steamId}');
 			`,
 			(err, res, fields) => {
 				if(err) console.log(err);
@@ -236,6 +236,7 @@ class Main {
 					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
 				ORDER BY rounds.id DESC LIMIT 1;
 				-- обновить профайл
+				UPDATE profiles SET nickName = '${newNickName}' where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
 			`,
 			(err, res, fields) => {
 				if(err) console.log(err);
