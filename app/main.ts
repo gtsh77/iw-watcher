@@ -58,7 +58,7 @@ class Main {
 		this.dgram.on('listening',() => console.log(`Listening to ${this.dgram.address().address} on ${this.dgram.address().port}`));
 		this.dgram.on('message', msg => this.msgHandler(msg));
 		this.scanServer();
-		//this.cmd('status', res => console.log(res.toString()));
+		//this.cmd('status', res => console.log(res.toString('utf8')));
 	}
 	public scanServer(callback?:(string, number) => void): void {
 		this.monitor({
@@ -73,9 +73,9 @@ class Main {
 	public msgHandler(msg: any): void {
 		try {
 			//объявим ключевые переменные
-			let utMsg = msg.toString(),
+			let utMsg = msg.toString('utf8'),
 				newRoundRe: RegExp = new RegExp(/World triggered "Round_Start"/),
-				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed)/),
+				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed|assisted killing)/),
 				dateLocal = new Date(),
 				arMsg: string[] = null,
 				playerNickName = null,
@@ -98,37 +98,66 @@ class Main {
 			//эмуляция id для ботов
 			if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
 			//определим суть сообщения
-			if(playerAction === 'attacked') return; //this.attackHandler(utMsg);
+			if(playerAction === 'attacked' || playerAction === 'killed' || playerAction === 'assisted killing') this.attackHandler(utMsg, dateLocal);
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
 			else if(playerAction === 'changed') this.setNickName(dateLocal, utMsg);
 			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
-			let utMsg: string = msg.toString();
+			let utMsg: string = msg.toString('utf8');
 			console.log(`!!! not_parsed: ${utMsg}`);
 		}
-		//let stMsg: string = msg.toString().slice(5,-1);
+		//let stMsg: string = msg.toString('utf8').slice(5,-1);
 	}
-	public attackHandler(stMsg: string): void {
-		let arMsg: string[] = stMsg.match(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(disconnected|\bconnected|entered|switched|triggered|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")(\w+)(?:".+damage ")(\w+)(?:".+health ")(\w+)"/),
-			m = arMsg[1],
-			d = arMsg[2],
-			y = arMsg[3],
-			h = arMsg[4],
-			mi = arMsg[5],
-			se = arMsg[6],
-			playerNickName = arMsg[7],
-			playerSteamId = arMsg[8],
-			playerAction = arMsg[9],
-			victimNickName = arMsg[10],
-			victimSteamId = arMsg[11],
-			weapon = arMsg[12],
-			damage = arMsg[13],
-			rHp = arMsg[14],
-			date = new Date(+y,+m-1,+d,+h,+mi,+se);
+	public attackHandler(stMsg: string, date: Date): void {
+		let arMsg: string[] = stMsg.match(/(?:.+)(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(assisted killing|attacked|killed)(?: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+with ")?(\w+)?(?:".+damage ")?(\w+)?(?:".+health ")?(\w+)?(?:".+\(hitgroup ")?([\w|\s]+)?(?:")?/),
+			playerNickName = arMsg[1],
+			playerSteamId = arMsg[2],
+			playerAction = arMsg[3],
+			victimNickName = arMsg[4],
+			victimSteamId = arMsg[5],
+			weapon = arMsg[6],
+			damage = arMsg[7],
+			rHp = arMsg[8],
+			hitgroup = arMsg[9];
 
-			console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp}`);
+			//эмуляция id для ботов
+			if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
+			if(victimSteamId === 'BOT') victimSteamId = `BOT_${victimNickName}`;
+
+			//разбор
+			if(playerAction === 'killed'){
+				console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon}`);
+			}
+			else if(playerAction === 'assisted killing'){
+				console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId}`);
+			}
+			else {
+				let newHash: string = this.crypto.randomBytes(5).toString('hex');
+				this.pool.getConnection((e, connection) => {
+					if(e) this.storeError(e,'error.log');
+					connection.query(`
+						-- добавим интеракшн
+						INSERT INTO interactions 
+							(hash,damage,rHealth,hitgroup,createdAt,roundId,srcId,srcSessionId,destId,destSessionId,weaponId)
+						SELECT '${newHash}','${damage}','${rHp}','${hitgroup}','${this.buildISO(date)}', rounds.id, sPlayer.id, sSession.id, dPlayer.id, dSession.id, weapons.id from rounds 
+						INNER JOIN players AS sPlayer ON sPlayer.steamId = '${playerSteamId}' 
+						INNER JOIN players AS dPlayer ON dPlayer.steamId = '${victimSteamId}' 
+						INNER JOIN sessions AS sSession ON sSession.playerId = sPlayer.id 
+						INNER JOIN sessions AS dSession ON dSession.playerId = dPlayer.id 
+						INNER JOIN weapons ON weapons.name = '${weapon}'
+						ORDER BY rounds.id DESC LIMIT 1;
+					`,
+					(e, res, fields) => {
+						if(e) this.storeError(e,'error.log');
+						connection.release();
+					});			
+				});
+
+				console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon} w ${damage} rHp ${rHp} IN ${hitgroup}`);
+			}
+			
 	}
 	public authHandler(steamId: string, playerNickName: string, date: Date): void {
 		//проверим есть ли игрок в базе
@@ -160,7 +189,7 @@ class Main {
 		//...
 	}
 	public registerNewPlayer(steamId: string, playerNickName: string, date: Date): void {
-		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats').digest('hex').slice(0,6);
+		let newHash: string = this.crypto.randomBytes(3).toString('hex');
 		this.pool.getConnection((e, connection) => {
 			if(e) this.storeError(e,'error.log');
 			connection.query(`
@@ -180,7 +209,7 @@ class Main {
 		});
 	}
 	public createSession(steamId: string, date: Date, nickname: string): void {
-		let newHash: string = this.crypto.createHash('DSA').update(steamId+'_iwstats_new_session_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,8);
+		let newHash: string = this.crypto.randomBytes(4).toString('hex');
 		this.pool.getConnection((e, connection) => {
 			if(e) this.storeError(e,'error.log');
 			connection.query(`
@@ -188,8 +217,8 @@ class Main {
 				INSERT INTO sessions (playerId, createdAt, hash) SELECT id, '${this.buildISO(date)}', '${newHash}' from players WHERE steamId = '${steamId}';
 
 				-- добавить в таблицу никнейм
-				INSERT INTO nicknames (value,roundId,playerId,sessionId) 
-				SELECT '${nickname}',rounds.id,players.id,sessions.id from rounds 
+				INSERT INTO nicknames (value,createdAt,roundId,playerId,sessionId) 
+				SELECT '${nickname}','${this.buildISO(date)}',rounds.id,players.id,sessions.id from rounds 
 					INNER JOIN players ON players.steamId = '${steamId}' 
 					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
 				ORDER BY rounds.id DESC LIMIT 1;
@@ -233,8 +262,8 @@ class Main {
 			if(e) this.storeError(e,'error.log');
 			connection.query(`
 				-- добавить в таблицу никнейм
-				INSERT INTO nicknames (value,roundId,playerId,sessionId) 
-				SELECT '${newNickName}',rounds.id,players.id,sessions.id from rounds 
+				INSERT INTO nicknames (value,createdAt,roundId,playerId,sessionId) 
+				SELECT '${newNickName}','${this.buildISO(date)}',rounds.id,players.id,sessions.id from rounds 
 					INNER JOIN players ON players.steamId = '${playerSteamId}' 
 					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
 				ORDER BY rounds.id DESC LIMIT 1;
@@ -245,13 +274,11 @@ class Main {
 				if(e) this.storeError(e,'error.log');
 				console.log(`## nickname stored: ${newNickName}`);
 				connection.release();
-			});			
-		});		
-
-		//обновить профайл
+			});
+		});
 	}
 	public createRound(date: Date): void {
-		let newHash: string = this.crypto.createHash('DSA').update('iwstats_new_round_'+(Math.random()*1e12).toFixed(0)).digest('hex').slice(0,6);
+		let newHash: string = this.crypto.randomBytes(3).toString('hex');
 		this.scanServer((map,pCnt) => {
 			this.pool.getConnection((e, connection) => {
 				if(e) this.storeError(e,'error.log');
@@ -281,6 +308,8 @@ class Main {
 
 		//*** фраг
 		//L 02/12/2017 - 19:14:17: "Shaman<2><STEAM_1:0:9977876><TERRORIST>" [224 2229 -127] killed "Paul<23><BOT><CT>" [334 2434 -63] with "ak47"
+
+		//RL 03/06/2017 - 02:37:07: "Doug<133><BOT><CT>" assisted killing "Wyatt<126><BOT><TERRORIST>"
 
 		//*** новый раунд
 		//msg L 02/12/2017 - 19:18:38: World triggered "Round_Start"
@@ -327,6 +356,9 @@ class Main {
 
 		//last 5 sessions + steamIds
 		//SELECT players.steamId,sessions.hash,MAX(sessions.createdAt),COUNT(sessions.playerId) as Total from sessions INNER JOIN players ON players.id = sessions.playerId GROUP BY sessions.playerId ORDER BY MAX(sessions.createdAt) DESC LIMIT 5;
+
+		//кто любит гранаты?
+		//select base.srcId,weapons.name AS WEAPON,COUNT(base.srcId) as HIT from interactions AS base INNER JOIN weapons ON weapons.id = weaponId WHERE weapons.name = 'hegrenade' GROUP BY base.srcId ORDER BY HIT DESC;
 
 	}
 
