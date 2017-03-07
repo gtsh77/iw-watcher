@@ -129,9 +129,52 @@ class Main {
 			//разбор
 			if(playerAction === 'killed'){
 				console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId} w ${weapon}`);
+				//обновим дб
+				this.pool.getConnection((e, connection) => {
+					if(e) this.storeError(e,'error.log');
+					connection.query(`
+						-- запишем вин и поинты в профайл
+						UPDATE profiles SET wins = wins + 1, points = points + 3 where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
+						-- запишем луз в профайл
+						UPDATE profiles SET losses = losses + 1 where playerId IN (SELECT id from players where steamId = '${victimSteamId}');
+						-- запишем вин и поинты в профайл сессии
+						INSERT IGNORE INTO roundprofiles (roundId,playerId,wins,points) 
+							SELECT rounds.id,players.id,1,3 FROM rounds 
+							INNER JOIN players ON players.steamId = '${playerSteamId}'
+							where endedAt IS NULL 
+						ON duplicate key UPDATE wins = wins + 1, points = points + 3;
+						-- запишем луз в профайл сессии
+						INSERT IGNORE INTO roundprofiles (roundId,playerId,losses) 
+							SELECT rounds.id,players.id,1 FROM rounds 
+							INNER JOIN players ON players.steamId = '${victimSteamId}'
+							where endedAt IS NULL 
+						ON duplicate key UPDATE losses = losses + 1;			
+
+					`,(err, res, fields) => {
+						if(e) this.storeError(e,'error.log');
+					});
+					connection.release();
+				});
 			}
 			else if(playerAction === 'assisted killing'){
 				console.log(`## ${date.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction} ${victimNickName} - ${victimSteamId}`);
+				//обновим дб
+				this.pool.getConnection((e, connection) => {
+					if(e) this.storeError(e,'error.log');
+					connection.query(`
+						-- запишем ассист и поинты в профайл
+						UPDATE profiles SET assists = assists + 1, points = points + 1 where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
+						-- запишем ассист и поинты в профайл сессии
+						INSERT IGNORE INTO roundprofiles (roundId,playerId,assists,points) 
+							SELECT rounds.id,players.id,1,1 FROM rounds 
+							INNER JOIN players ON players.steamId = '${playerSteamId}'
+							where endedAt IS NULL
+						ON duplicate key UPDATE assists = assists + 1, points = points + 1;
+					`,(err, res, fields) => {
+						if(e) this.storeError(e,'error.log');
+					});
+					connection.release();
+				});
 			}
 			else {
 				let newHash: string = this.crypto.randomBytes(5).toString('hex');
@@ -359,6 +402,9 @@ class Main {
 
 		//кто любит гранаты?
 		//select base.srcId,weapons.name AS WEAPON,COUNT(base.srcId) as HIT from interactions AS base INNER JOIN weapons ON weapons.id = weaponId WHERE weapons.name = 'hegrenade' GROUP BY base.srcId ORDER BY HIT DESC;
+
+		//получи ранк
+		//select count(*) AS rank from profiles INNER JOIN players ON players.steamId = 'STEAM_1:0:9977876' INNER JOIN profiles AS t ON t.playerId = players.id where profiles.wins >= t.wins;
 
 	}
 
