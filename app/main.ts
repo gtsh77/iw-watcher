@@ -134,21 +134,33 @@ class Main {
 					if(e) this.storeError(e,'error.log');
 					connection.query(`
 						-- запишем вин и поинты в профайл
-						UPDATE profiles SET wins = wins + 1, points = points + 3 where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
+						UPDATE profiles SET wins = wins + 1, points = points + 3, ratio = wins / losses where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
 						-- запишем луз в профайл
-						UPDATE profiles SET losses = losses + 1 where playerId IN (SELECT id from players where steamId = '${victimSteamId}');
-						-- запишем вин и поинты в профайл сессии
+						UPDATE profiles SET losses = losses + 1, ratio = wins / losses where playerId IN (SELECT id from players where steamId = '${victimSteamId}');
+						-- запишем вин и поинты в профайл раунда
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,wins,points) 
 							SELECT rounds.id,players.id,1,3 FROM rounds 
 							INNER JOIN players ON players.steamId = '${playerSteamId}'
 							where endedAt IS NULL 
-						ON duplicate key UPDATE wins = wins + 1, points = points + 3;
-						-- запишем луз в профайл сессии
+						ON duplicate key UPDATE wins = wins + 1, ratio = wins / losses, points = points + 3;
+						-- запишем луз в профайл раунда
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,losses) 
 							SELECT rounds.id,players.id,1 FROM rounds 
 							INNER JOIN players ON players.steamId = '${victimSteamId}'
 							where endedAt IS NULL 
-						ON duplicate key UPDATE losses = losses + 1;			
+						ON duplicate key UPDATE losses = losses + 1, ratio = wins / losses;	
+						-- запишем вин и поинты в профайл сессии
+						INSERT IGNORE INTO sessionprofiles (sessionId,playerId,wins,points) 
+							SELECT sessions.id,players.id,1,3 FROM sessions 
+							INNER JOIN players ON players.steamId = '${playerSteamId}'
+							where endedAt IS NULL AND playerId = players.id
+						ON duplicate key UPDATE wins = wins + 1, ratio = wins / losses, points = points + 3;
+						-- запишем луз в профайл сессии
+						INSERT IGNORE INTO sessionprofiles (sessionId,playerId,losses) 
+							SELECT sessions.id,players.id,1 FROM sessions 
+							INNER JOIN players ON players.steamId = '${victimSteamId}'
+							where endedAt IS NULL AND playerId = players.id
+						ON duplicate key UPDATE losses = losses + 1, ratio = wins / losses;			
 
 					`,(err, res, fields) => {
 						if(e) this.storeError(e,'error.log');
@@ -164,11 +176,17 @@ class Main {
 					connection.query(`
 						-- запишем ассист и поинты в профайл
 						UPDATE profiles SET assists = assists + 1, points = points + 1 where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
-						-- запишем ассист и поинты в профайл сессии
+						-- запишем ассист и поинты в профайл раунда
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,assists,points) 
 							SELECT rounds.id,players.id,1,1 FROM rounds 
 							INNER JOIN players ON players.steamId = '${playerSteamId}'
 							where endedAt IS NULL
+						ON duplicate key UPDATE assists = assists + 1, points = points + 1;
+						-- запишем ассист и поинты в профайл сессии
+						INSERT IGNORE INTO sessionprofiles (sessionId,playerId,assists,points) 
+							SELECT sessions.id,players.id,1,1 FROM sessions 
+							INNER JOIN players ON players.steamId = '${playerSteamId}'
+							where endedAt IS NULL AND playerId = players.id
 						ON duplicate key UPDATE assists = assists + 1, points = points + 1;
 					`,(err, res, fields) => {
 						if(e) this.storeError(e,'error.log');
