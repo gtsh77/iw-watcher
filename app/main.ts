@@ -25,7 +25,7 @@ class Main {
 		let sourceconIn = new this.sourcecon("192.168.0.19", 27015); 
 		sourceconIn.connect(err => {
 		    if(err) return err;
-		    sourceconIn.auth("qwerty", err => {
+		    sourceconIn.auth("sexxy", err => {
 		        if(err) return err;
 		        sourceconIn.send(cmd, (err, res) => {
 		            if(err) return err; 
@@ -75,7 +75,7 @@ class Main {
 			//объявим ключевые переменные
 			let utMsg = msg.toString('utf8'),
 				newRoundRe: RegExp = new RegExp(/World triggered "Round_Start"/),
-				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed|assisted killing)/),
+				commonRe: RegExp = new RegExp(/(?:L )(\d{2})\/(\d{2})\/(\d{4})(?: - )(\d{2}):(\d{2}):(\d{2})(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(say_team|say|changed|disconnected|\bconnected|entered|switched|triggered|attacked|killed|assisted killing)/),
 				dateLocal = new Date(),
 				arMsg: string[] = null,
 				playerNickName = null,
@@ -102,6 +102,7 @@ class Main {
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
 			else if(playerAction === 'changed') this.setNickName(dateLocal, utMsg);
+			else if(playerAction === 'say') this.textHandler(dateLocal, utMsg);
 			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
@@ -160,10 +161,15 @@ class Main {
 							SELECT sessions.id,players.id,1 FROM sessions 
 							INNER JOIN players ON players.steamId = '${victimSteamId}'
 							where endedAt IS NULL AND playerId = players.id
-						ON duplicate key UPDATE losses = losses + 1, ratio = wins / losses;			
+						ON duplicate key UPDATE losses = losses + 1, ratio = wins / losses;	
+						-- получим поинты
+						SELECT points from profiles INNER JOIN players ON players.steamId = '${playerSteamId}' where profiles.playerId = players.id;
 
 					`,(err, res, fields) => {
 						if(e) this.storeError(e,'error.log');
+						else {
+							(playerSteamId !== 'BOT') && this.cmd(`sm_psay ${playerNickName} "+3 points (${res[6][0].points}) for winning ${victimNickName} at ${date.toTimeString().slice(0,date.toTimeString().indexOf(' '))}"`);
+						}
 					});
 					connection.release();
 				});
@@ -188,8 +194,13 @@ class Main {
 							INNER JOIN players ON players.steamId = '${playerSteamId}'
 							where endedAt IS NULL AND playerId = players.id
 						ON duplicate key UPDATE assists = assists + 1, points = points + 1;
+						-- получим поинты
+						SELECT points from profiles INNER JOIN players ON players.steamId = '${playerSteamId}' where profiles.playerId = players.id;						
 					`,(err, res, fields) => {
 						if(e) this.storeError(e,'error.log');
+						else {
+							(playerSteamId !== 'BOT') && this.cmd(`sm_psay ${playerNickName} "+1 point (${res[3][0].points}) for assisting ${victimNickName} at ${date.toTimeString().slice(0,date.toTimeString().indexOf(' '))}"`);							
+						}
 					});
 					connection.release();
 				});
@@ -357,6 +368,72 @@ class Main {
 			});
 		});		
 	}
+	public textHandler(date: Date, stMsg: string): void {
+		let arMsg: string[] = stMsg.match(/(?:.+)(?:: ")(.[^<\d]+)(?:.+)(STEAM_[\d|:]+|BOT)(?:.+)(say|say_team)(?: ")(.+)(?:")/),
+			playerNickName = arMsg[1],
+			playerSteamId = arMsg[2],
+			playerText = arMsg[4];
+
+		//эмуляция id для ботов
+		if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
+
+		if(playerText === 'rank'){
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
+				connection.query(`
+					-- получим ранк
+					SELECT COUNT(*) AS rank, t.points FROM profiles INNER JOIN players ON players.steamId = '${playerSteamId}' INNER JOIN profiles AS t ON t.playerId = players.id WHERE profiles.points >= t.points;
+					-- получим тотал
+					SELECT count(*) AS total FROM profiles;
+				`,
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
+					this.cmd(`say ${playerNickName} POSITION ${res[0][0].rank}/${res[1][0].total} with ${res[0][0].points} points`);
+					connection.release();
+				});
+			});
+		}
+
+		else if(playerText === 'ratio' || playerText === 'total'){
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
+				connection.query(`
+					-- получим ратио
+					SELECT wins, assists, losses, ratio FROM profiles INNER JOIN players ON players.steamId = '${playerSteamId}' WHERE playerId = players.id;
+				`,
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
+					this.cmd(`say ${playerNickName} TOTAL WINS: ${res[0].wins}, ASSISTS: ${res[0].assists}, LOSSES: ${res[0].losses}, RATIO: ${res[0].ratio}`);
+					connection.release();
+				});
+			});
+		}
+
+		else if(playerText === 'session'){
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
+				connection.query(`
+					-- получим sessionprofile
+					SELECT points,wins,assists,losses,ratio from sessionprofiles 
+						INNER JOIN players ON players.steamId = '${playerSteamId}'
+						INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL 
+						WHERE sessionprofiles.sessionId = sessions.id AND sessionprofiles.playerId = players.id;
+				`,
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
+					if(res.length){
+						this.cmd(`say ${playerNickName} SESSION POINTS: ${res[0].points} WINS: ${res[0].wins}, ASSISTS: ${res[0].assists}, LOSSES: ${res[0].losses}, RATIO: ${res[0].ratio}`);
+						connection.release();						
+					}
+					else {
+						this.cmd(`say ${playerNickName} to start new session you need to win or loose`);
+					}
+				});
+			});
+		}
+
+		else this.cmd(`sm_psay ${playerNickName} "${playerText}"`);		
+	}	
 
 	static msgList(): void {
 		//*** сказать
@@ -422,7 +499,7 @@ class Main {
 		//select base.srcId,weapons.name AS WEAPON,COUNT(base.srcId) as HIT from interactions AS base INNER JOIN weapons ON weapons.id = weaponId WHERE weapons.name = 'hegrenade' GROUP BY base.srcId ORDER BY HIT DESC;
 
 		//получи ранк
-		//select count(*) AS rank from profiles INNER JOIN players ON players.steamId = 'STEAM_1:0:9977876' INNER JOIN profiles AS t ON t.playerId = players.id where profiles.wins >= t.wins;
+		//select count(*) AS rank from profiles INNER JOIN players ON players.steamId = 'STEAM_1:0:9977876' INNER JOIN profiles AS t ON t.playerId = players.id where profiles.points >= t.points;
 
 	}
 
