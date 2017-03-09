@@ -58,6 +58,7 @@ class Main {
 		this.dgram.on('listening',() => console.log(`Listening to ${this.dgram.address().address} on ${this.dgram.address().port}`));
 		this.dgram.on('message', msg => this.msgHandler(msg));
 		this.scanServer();
+		this.msgRotation();
 		//this.cmd('status', res => console.log(res.toString('utf8')));
 	}
 	public scanServer(callback?:(string, number) => void): void {
@@ -274,7 +275,7 @@ class Main {
 					if(e) this.storeError(e,'error.log');
 					console.log(`## ${date.toLocaleTimeString()} new player registered: ${newHash} ${playerNickName}`);
 					this.cmd(`say ## NEW PLAYER: ${newHash} - ${playerNickName}`);
-					connection.release();							
+					connection.release();
 			});
 			//создадим сессию
 			this.createSession(steamId, date, playerNickName);
@@ -432,8 +433,53 @@ class Main {
 			});
 		}
 
-		else this.cmd(`sm_psay ${playerNickName} "${playerText}"`);		
+		else if(playerText === 'top' || playerText === 'top5'){
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
+				connection.query(`
+					-- получим топ5
+					SELECT nickName,points FROM profiles ORDER BY points DESC LIMIT 5;
+				`,
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
+					console.log(res[0].nickName);
+					for(let i:number = 0; i < res.length; i++){
+						this.cmd(`say #${(i+1)} ${res[i].nickName} ${res[i].points} points`);
+					}
+					connection.release();
+				});
+			});			
+		}
+
+		else if(playerText === 'top10'){
+			this.pool.getConnection((e, connection) => {
+				if(e) this.storeError(e,'error.log');
+				connection.query(`
+					-- получим топ10
+					SELECT nickName,points FROM profiles ORDER BY points DESC LIMIT 10;
+				`,
+				(e, res, fields) => {
+					if(e) this.storeError(e,'error.log');
+					console.log(res[0].nickName);
+					for(let i:number = 0; i < res.length; i++){
+						this.cmd(`say #${(i+1)} ${res[i].nickName} ${res[i].points} points`);
+					}
+					connection.release();
+				});
+			});			
+		}
+
+		else return;
 	}	
+	public msgRotation(): void {
+		let adv1: any = setInterval(() => {
+			this.cmd('say STAT-COMMANDS: rank, session, ratio, top');
+		},300000);
+
+		// let adv2: any = setInterval(() => {
+		// 	this.cmd('say admin contact telegram: @gtsh77');
+		// },360000);
+	}
 
 	static msgList(): void {
 		//*** сказать
