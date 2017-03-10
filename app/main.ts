@@ -379,6 +379,23 @@ class Main {
 		//эмуляция id для ботов
 		if(playerSteamId === 'BOT') playerSteamId = `BOT_${playerNickName}`;
 
+		//запишем лог
+		this.pool.getConnection((e, connection) => {
+			if(e) this.storeError(e,'error.log');
+			connection.query(`
+				INSERT INTO messages (value,createdAt,roundId,playerId) 
+					SELECT '${playerText}','${this.buildISO(date)}',rounds.id,players.id FROM rounds 
+					INNER JOIN players ON players.steamId = 'STEAM_1:0:9977876'
+					WHERE rounds.endedAt IS NULL AND rounds.serverId = ${this.serverId}
+					ORDER BY rounds.id DESC LIMIT 1;
+			`,
+			(e, res, fields) => {
+				if(e) this.storeError(e,'error.log');
+				connection.release();
+			});
+		});
+
+		//разберем нужен ли ответ
 		if(playerText === 'rank'){
 			this.pool.getConnection((e, connection) => {
 				if(e) this.storeError(e,'error.log');
