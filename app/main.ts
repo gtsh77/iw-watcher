@@ -4,6 +4,7 @@
 console.log('*** WELCOME ***');
 
 class Main {
+	protected serverId = 1;
 	protected fs = require('fs');
 	protected StringDecoder = require('string_decoder').StringDecoder;
 	protected dgram = require('dgram').createSocket('udp4');
@@ -103,7 +104,7 @@ class Main {
 			else if(playerAction === 'connected') this.authHandler(playerSteamId,playerNickName, dateLocal);
 			else if(playerAction === 'disconnected') this.endSession(playerSteamId, dateLocal);
 			else if(playerAction === 'changed') this.setNickName(dateLocal, utMsg);
-			else if(playerAction === 'say') this.textHandler(dateLocal, utMsg);
+			else if(playerAction === 'say' || playerAction === 'say_team') this.textHandler(dateLocal, utMsg);
 			else console.log(`!!! not_specified ${dateLocal.toLocaleTimeString()} ${playerNickName} - ${playerSteamId} ${playerAction}`);
 		}
 		catch(e){
@@ -143,13 +144,13 @@ class Main {
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,wins,points) 
 							SELECT rounds.id,players.id,1,3 FROM rounds 
 							INNER JOIN players ON players.steamId = '${playerSteamId}'
-							where endedAt IS NULL 
+							where endedAt IS NULL AND serverId = ${this.serverId} 
 						ON duplicate key UPDATE wins = wins + 1, ratio = wins / losses, points = points + 3;
 						-- запишем луз в профайл раунда
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,losses) 
 							SELECT rounds.id,players.id,1 FROM rounds 
 							INNER JOIN players ON players.steamId = '${victimSteamId}'
-							where endedAt IS NULL 
+							where endedAt IS NULL AND serverId = ${this.serverId} 
 						ON duplicate key UPDATE losses = losses + 1, ratio = wins / losses;	
 						-- запишем вин и поинты в профайл сессии
 						INSERT IGNORE INTO sessionprofiles (sessionId,playerId,wins,points) 
@@ -187,7 +188,7 @@ class Main {
 						INSERT IGNORE INTO roundprofiles (roundId,playerId,assists,points) 
 							SELECT rounds.id,players.id,1,1 FROM rounds 
 							INNER JOIN players ON players.steamId = '${playerSteamId}'
-							where endedAt IS NULL
+							where endedAt IS NULL AND serverId = ${this.serverId} 
 						ON duplicate key UPDATE assists = assists + 1, points = points + 1;
 						-- запишем ассист и поинты в профайл сессии
 						INSERT IGNORE INTO sessionprofiles (sessionId,playerId,assists,points) 
@@ -217,10 +218,10 @@ class Main {
 						SELECT '${newHash}','${damage}','${rHp}','${hitgroup}','${this.buildISO(date)}', rounds.id, sPlayer.id, sSession.id, dPlayer.id, dSession.id, weapons.id from rounds 
 						INNER JOIN players AS sPlayer ON sPlayer.steamId = '${playerSteamId}' 
 						INNER JOIN players AS dPlayer ON dPlayer.steamId = '${victimSteamId}' 
-						INNER JOIN sessions AS sSession ON sSession.playerId = sPlayer.id 
-						INNER JOIN sessions AS dSession ON dSession.playerId = dPlayer.id 
+						INNER JOIN sessions AS sSession ON sSession.playerId = sPlayer.id AND sSession.endedAt IS NULL
+						INNER JOIN sessions AS dSession ON dSession.playerId = dPlayer.id AND dSession.endedAt IS NULL
 						INNER JOIN weapons ON weapons.name = '${weapon}'
-						ORDER BY rounds.id DESC LIMIT 1;
+						WHERE rounds.endedAt IS NULL AND rounds.serverId = ${this.serverId} ORDER BY rounds.id DESC LIMIT 1;
 					`,
 					(e, res, fields) => {
 						if(e) this.storeError(e,'error.log');
@@ -339,7 +340,7 @@ class Main {
 				SELECT '${newNickName}','${this.buildISO(date)}',rounds.id,players.id,sessions.id from rounds 
 					INNER JOIN players ON players.steamId = '${playerSteamId}' 
 					INNER JOIN sessions ON sessions.playerId = players.id AND sessions.endedAt IS NULL
-				ORDER BY rounds.id DESC LIMIT 1;
+				WHERE serverId = ${this.serverId} ORDER BY rounds.id DESC LIMIT 1;
 				-- обновить профайл
 				UPDATE profiles SET nickName = '${newNickName}' where playerId IN (SELECT id from players where steamId = '${playerSteamId}');
 			`,
@@ -357,9 +358,9 @@ class Main {
 				if(e) this.storeError(e,'error.log');
 				connection.query(`
 					-- завершим ласт
-					UPDATE rounds set endedAt = '${this.buildISO(date)}' ORDER BY id DESC LIMIT 1;
+					UPDATE rounds set endedAt = '${this.buildISO(date)}' WHERE serverId = ${this.serverId} ORDER BY id DESC LIMIT 1;
 					-- добавим раунд
-					INSERT INTO rounds (hash,createdAt,serverId,mapId) SELECT '${newHash}','${this.buildISO(date)}',1,id from maps where name = '${map}';
+					INSERT INTO rounds (hash,createdAt,serverId,mapId) SELECT '${newHash}','${this.buildISO(date)}',${this.serverId},id from maps where name = '${map}';
 				`,
 				(e, res, fields) => {
 					if(e) this.storeError(e,'error.log');
@@ -469,11 +470,15 @@ class Main {
 			});			
 		}
 
+		else if(playerText === 'time'){
+			this.cmd(`say CURRENT TIME: ${date.toTimeString().slice(0,date.toTimeString().indexOf(' '))}`);	
+		}
+
 		else return;
 	}	
 	public msgRotation(): void {
 		let adv1: any = setInterval(() => {
-			this.cmd('say STAT-COMMANDS: rank, session, ratio, top');
+			this.cmd('say STAT-COMMANDS: rank, session, ratio, top, time');
 		},300000);
 
 		// let adv2: any = setInterval(() => {
