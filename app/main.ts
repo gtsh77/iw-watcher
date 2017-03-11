@@ -19,6 +19,7 @@ class Main {
 		database		: 'iwstats'		
 	});
 	protected crypto = require('crypto');
+	protected http = require('http');
 	protected map: string = null;
 	protected playersNum: number = null;
 	public cmd(cmd: string, callback?: (res: string) => void){
@@ -234,6 +235,30 @@ class Main {
 			
 	}
 	public authHandler(steamId: string, playerNickName: string, date: Date): void {
+		//получим ip адрес игрока из статуса
+		//console.log(`(?:"${playerNickName}" )(STEAM_[\d|:]+|BOT)(?:.+ )?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})?(?::.+)?`);
+		this.cmd('status',res => {
+			//console.log(res.toString());
+			let regExp: RegExp = new RegExp(`(?:"${playerNickName}" )(STEAM_[\\d|:]+|BOT)(?:.+ )?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})?(?::.+)?`,`m`),
+				stArr: string[] = res.toString().match(regExp),
+				ip = stArr[2],
+				ipInfo = null;
+			//получим инфу по адресу
+			ip && this.http.get(`http://ip-api.com/json/${ip}`, res => {
+				let data: string = '';
+				res.setEncoding('utf8');
+				res.on('data',function(chunk){
+					data += chunk;
+				});
+				res.on('end',() => {
+					let pData: any = JSON.parse(data);
+					if(pData.status === 'success'){
+						console.log(`${pData.country} ${pData.city}`);
+					}
+					else console.log('bad_ip');					
+				});
+			});
+		});	
 		//проверим есть ли игрок в базе
 		this.pool.getConnection((e, connection) => {
 			if(e) this.storeError(e,'error.log');
@@ -244,7 +269,7 @@ class Main {
 					this.createSession(steamId, date, playerNickName);
 					//какие-то ответы
 					console.log(`## ${date.toLocaleTimeString()} player auth: ${res[0].hash} ${playerNickName}`);
-					this.cmd(`say [${res[0].hash}] ${playerNickName} auth`);
+					this.cmd(`say [${res[0].hash}] ${playerNickName} from auth`);
 				}
 				else this.registerNewPlayer(steamId, playerNickName, date);
 			});
